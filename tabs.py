@@ -160,7 +160,7 @@ async def scrape_overview(soup):
 
     overview = []
     
-    listing_article = soup.find("div", id="listing-article")
+    listing_article = soup.find("div", id="listing-article") 
 
     if listing_article:
         listing_article_all_div = listing_article.find_all("div", recursive=False)
