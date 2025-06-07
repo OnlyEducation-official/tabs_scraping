@@ -1,15 +1,26 @@
 from bs4 import BeautifulSoup
 
 VALID_CLASSES_OVERVIEW = [
-        "cdcms_ranking","cdcms_cut_off","cdcms_cutoff",
-        "cdcms_admission_process", "cdcms_placement", "cdcms_exam_highlights","cdcms_application_process",
-        "cdcms_courses","cdcms_admission_highlights","cdcms_scholarship",
-        "cdcms_section2", "cdcms_section3", "cdcms_section4",
-        "cdcms_section5", "cdcms_section6", "cdcms_section7", "cdcms_section8","cdcms_scholarships",
-        "cdcms_section9", "cdcms_section10", "cdcms_section11", "cdcms_section12","cdcms_comparison","cdcms_faculty"
-    ]
+    "cdcms_ranking","cdcms_cut_off","cdcms_cutoff",
+    "cdcms_admission_process", "cdcms_placement", "cdcms_exam_highlights","cdcms_application_process",
+    "cdcms_courses","cdcms_admission_highlights","cdcms_scholarship",
+    "cdcms_section2", "cdcms_section3", "cdcms_section4",
+    "cdcms_section5", "cdcms_section6", "cdcms_section7", "cdcms_section8","cdcms_scholarships",
+    "cdcms_section9", "cdcms_section10", "cdcms_section11", "cdcms_section12","cdcms_comparison","cdcms_faculty"
+]
 
-VALID_CLASSES_SET_overview = set(VALID_CLASSES_OVERVIEW)
+VALID_CLASSES_SET_OVERVIEW = set(VALID_CLASSES_OVERVIEW)
+
+VALID_CLASSES_PLACEMENT = [
+    "cdcms_ranking","cdcms_cut_off","cdcms_cutoff",
+    "cdcms_admission_process", "cdcms_exam_highlights","cdcms_application_process",
+    "cdcms_courses","cdcms_admission_highlights","cdcms_scholarship",
+    "cdcms_section2", "cdcms_section3", "cdcms_section4",
+    "cdcms_section5", "cdcms_section6", "cdcms_section7", "cdcms_section8","cdcms_scholarships",
+    "cdcms_section9", "cdcms_section10", "cdcms_section11", "cdcms_section12","cdcms_comparison","cdcms_faculty"
+]
+
+VALID_CLASSES_SET_PLACEMENT = set(VALID_CLASSES_PLACEMENT)
 
 VALID_CLASSES_ADMISSION = [
     "cdcms_application_process","cdcms_course_highlight","cdcms_setion1"
@@ -17,15 +28,17 @@ VALID_CLASSES_ADMISSION = [
 
 VALID_CLASSES_SET_ADMISSION = set(VALID_CLASSES_ADMISSION)
 
-def extract_sections_by_class(listing_article):
+def extract_sections_by_class(listing_article,valid_classes_set):
 
     tabs_data = []
     idx = 1
 
+
+
     for div in listing_article.find_all("div", recursive=True):
         classes = div.get("class", [])
         
-        matched = next((cls for cls in classes if cls in VALID_CLASSES_SET_overview), None)
+        matched = next((cls for cls in classes if cls in valid_classes_set), None)
 
         if matched:
             h2_tag = div.find("h2")
@@ -173,16 +186,12 @@ async def scrape_overview(soup):
             ]
 
             if section1_divs:
-
-                overview.extend(extract_sections_by_class(section1_divs[0]))
-
-                # if not overview:
+                overview.extend(extract_sections_by_class(section1_divs[0],VALID_CLASSES_SET_OVERVIEW))
                 overview.extend(extract_dynamic_data_by_h2(section1_divs[0]))
-            else:
-                overview.extend(extract_sections_by_class(section1_divs[0]))
 
-                # if not overview:
-                overview.extend(extract_dynamic_data_by_h2(section1_divs[0]))
+            if not overview:
+                overview.extend(extract_sections_by_class(listing_article,VALID_CLASSES_SET_OVERVIEW))
+                overview.extend(extract_dynamic_data_by_h2(listing_article))
             
 
                     
@@ -191,7 +200,6 @@ async def scrape_overview(soup):
 async def scrape_admission(soup):
 
     admission = []
-    flag = False
     
     listing_article = soup.find("div", id="listing-article")
     if listing_article:
@@ -207,28 +215,27 @@ async def scrape_admission(soup):
                 for cls in target_classes:
                     matched = find_first_div.find("div", class_=cls)
                     if matched:
-                        admission = extract_dynamic_data_by_h2(matched) 
-                        flag = True
+                        print("matched:", matched.has_attr('class'))
+                        admission.extend(extract_dynamic_data_by_h2(matched))
             
-            if not flag:
-                admission = extract_dynamic_data_by_h2(listing_article) 
+            admission.extend(extract_dynamic_data_by_h2(listing_article))
 
 
-            for h2 in h2_tags:
-                wrapper_div = h2.find_next_sibling("div")
-                if not wrapper_div:
-                    continue
+            # for h2 in h2_tags:
+            #     wrapper_div = h2.find_next_sibling("div")
+            #     if not wrapper_div:
+            #         continue
 
-                for inner in wrapper_div.find_all("div", recursive=False):
-                    inner_classes = inner.get("class", [])
-                    if VALID_CLASSES_SET_ADMISSION.intersection(inner_classes):
-                        admission.append({
-                            "title": h2.get_text(strip=True),
-                            "content": str(inner).strip()
-                        })
-                        break
+            #     for inner in wrapper_div.find_all("div", recursive=False):
+            #         inner_classes = inner.get("class", [])
+            #         if VALID_CLASSES_SET_ADMISSION.intersection(inner_classes):
+            #             admission.append({
+            #                 "title": h2.get_text(strip=True),
+            #                 "content": str(inner).strip()
+            #             })
+            #             break
         else:
-            admission = extract_sections_by_class(listing_article)
+            admission = extract_sections_by_class(listing_article,VALID_CLASSES_SET_OVERVIEW)
 
     return admission
 
@@ -237,15 +244,13 @@ async def scrape_placements(soup):
     placement = []
 
     if listing_article:
-        placement = parse_article_sections(listing_article, VALID_CLASSES_SET_overview)
-
-        # cdcms_section1 = listing_article.find("div",class_="cdcms_section1",recursive=False)
-        # if cdcms_section1:
-        #     placement.extend(extract_sections_by_class(cdcms_section1))
-
-        # cdcms_placement = listing_article.find("div",class_="cdcms_placement",recursive=False)
-        # if cdcms_placement:
-        #     placement.extend(extract_dynamic_data_by_h2(cdcms_placement))
+        
+        cdcms_placement = listing_article.find("div",class_="cdcms_placement",recursive=False)
+        if cdcms_placement:
+            placement.extend(extract_sections_by_class(listing_article,VALID_CLASSES_SET_PLACEMENT))
+            placement.extend(extract_dynamic_data_by_h2(cdcms_placement))
+        else:
+            placement.extend(extract_sections_by_class(listing_article,VALID_CLASSES_SET_OVERVIEW))
 
     return placement
 
@@ -255,6 +260,7 @@ async def scrape_cutoff(soup):
     listing_article = soup.find("div",id="listing-article")
 
     cutoff = []
+    cutof = []
 
     if listing_article:
 
@@ -263,9 +269,29 @@ async def scrape_cutoff(soup):
         if not cutoff:
 
             cdcms_cutoff = listing_article.find_all(recursive=False)
-
             cutoff = extract_dynamic_data_by_h2(cdcms_cutoff[0])
-            
+
+        
+    if not cutoff:
+        jsx_3964047535_mt_4 = soup.find_all("div",class_="jsx-3964047535 mt-4",recursive=True)
+
+        if jsx_3964047535_mt_4:
+            for inside_div in jsx_3964047535_mt_4:
+
+                all_div = inside_div.find_all("div",recursive=False)
+
+                if all_div:
+
+                    h2_tag = all_div[0].find("h2")
+                    if h2_tag:
+                        h2_text = h2_tag.get_text() if h2_tag else "Content writer needs to add title here!"
+                        h2_tag.decompose()
+                    
+                    cutoff.append({
+                        "title":h2_text,
+                        "content": "".join( str(i) for i in all_div[:len(all_div) - 1])
+                    })
+                                
 
     return cutoff
 

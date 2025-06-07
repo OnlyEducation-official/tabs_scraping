@@ -3,7 +3,7 @@ import json
 import os
 from playwright.async_api import async_playwright
 from utils import get_college_slug, delay, USER_AGENTS
-from tabs import  scrape_overview # , scrape_placements , scrape_admission , scrape_cutoff
+from tabs import scrape_cutoff   # scrape_placements,scrape_admission ,scrape_overview , scrape_placements  , 
 from bs4 import BeautifulSoup
 import logging
 from dotenv import load_dotenv
@@ -27,10 +27,10 @@ STRAPI_DATA_FILE = os.getenv('STRAPI_DATA_FILE', 'all_strapi_data.json')
 
 # Define the tabs and their corresponding scraping functions
 TAB_FUNCTIONS = {
-    "overview": scrape_overview,
+    # "overview": scrape_overview,
     # "admission": scrape_admission,
     # "placement": scrape_placements,
-    # "cutoff": scrape_cutoff,
+    "cutoff": scrape_cutoff,
 }
 
 TABS = list(TAB_FUNCTIONS.keys())
@@ -47,7 +47,7 @@ def readurl():
 
 os.makedirs("output", exist_ok=True)
 
-def polite_wait(min_delay=3, max_delay=4):
+def polite_wait(min_delay=3, max_delay=6):
     """Introduces a random delay to be polite to the server."""
     wait_time = random.uniform(min_delay, max_delay)
     time.sleep(wait_time)
@@ -64,6 +64,12 @@ def remove_a_img(soup):
         tag.decompose()
 
     for tag in soup.select("svg"):
+        tag.decompose()
+
+    for tag in soup.select("div.body-adslot"):
+        tag.decompose()
+    
+    for tag in soup.select("div.bodyslot-new"):
         tag.decompose()
 
     faq = soup.select_one(".cdcms_faqs")
@@ -91,7 +97,7 @@ async def scrape_college(page, college_obj,university_data,idx):
         retry_attempts = 3
         for attempt in range(retry_attempts):
             try:
-                # polite_wait()
+                polite_wait()
                 res = await page.goto(tab_url, timeout=30000, wait_until="domcontentloaded")
                 if res and res.status != 200:
                     print(f"[SKIPPED] {tab} tab returned {res.status} for {college_name}")
@@ -179,7 +185,7 @@ async def main():
 
         college_name = ''
 
-        for data in college_data[17:30]:
+        for data in college_data[0:31]:
             try:
 
                 if idx % ROTATE_DRIVER_INTERVAL == 0:
