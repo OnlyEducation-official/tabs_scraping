@@ -18,5 +18,5 @@ def get_college_slug(url):
     slug = re.sub(r"https?://collegedunia\.com/(university|college)/\d+-", "", url)
     return slug.replace("/", "-")
 
-async def delay(min_delay=2, max_delay=4):
+async def delay(min_delay=2, max_delay=6):
     await asyncio.sleep(random.uniform(min_delay, max_delay))
