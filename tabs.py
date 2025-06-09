@@ -33,8 +33,6 @@ def extract_sections_by_class(listing_article,valid_classes_set):
     tabs_data = []
     idx = 1
 
-
-
     for div in listing_article.find_all("div", recursive=True):
         classes = div.get("class", [])
         
@@ -101,77 +99,8 @@ def extract_dynamic_data_by_h2(section):
 
     return array_data
 
-def parse_article_sections(listing_article, valid_class_set=None):
-
-    sections = []
-    seen_titles = set()
-
-    if valid_class_set:
-        for div in listing_article.find_all("div", recursive=True):
-            classes = div.get("class", [])
-            matched = next((cls for cls in classes if cls in valid_class_set), None)
-
-            if matched:
-                h2_tag = div.find("h2")
-                title = h2_tag.get_text(strip=True) if h2_tag else f"Section {len(sections)+1}"
-                if h2_tag: h2_tag.decompose()
-
-                if title not in seen_titles:
-                    sections.append({
-                        "title": title,
-                        "content": str(div).strip(),
-                        "source": "class"
-                    })
-                    seen_titles.add(title)
-
-    if not sections:
-        elements = listing_article.find_all(recursive=False)
-        i = 0
-        while i < len(elements):
-            tag = elements[i]
-            content_parts = []
-
-            if tag.name == "h2":
-                title = tag.get_text(strip=True)
-                if title == "Table of Content":
-                    i += 2
-                    continue
-
-                j = 1
-                while i + j < len(elements) and elements[i + j].name != "h2":
-                    content_parts.append(str(elements[i + j]))
-                    j += 1
-
-                if title not in seen_titles:
-                    sections.append({
-                        "title": title,
-                        "content": "".join(content_parts).strip(),
-                        "source": "h2"
-                    })
-                    seen_titles.add(title)
-
-                i += j
-            else:
-                i += 1
-
-    if not sections:
-        flat_parts = []
-        for el in listing_article.find_all(["p", "div"], recursive=False):
-            flat_parts.append(str(el))
-
-        if flat_parts:
-            sections.append({
-                "title": "Overview",
-                "content": "".join(flat_parts).strip(),
-                "source": "flat"
-            })
-
-    return sections
-
-
 async def scrape_overview(soup):
     
-
     overview = []
     
     listing_article = soup.find("div", id="listing-article") 
@@ -192,9 +121,7 @@ async def scrape_overview(soup):
             if not overview:
                 overview.extend(extract_sections_by_class(listing_article,VALID_CLASSES_SET_OVERVIEW))
                 overview.extend(extract_dynamic_data_by_h2(listing_article))
-            
 
-                    
     return overview
 
 async def scrape_admission(soup):
@@ -207,7 +134,6 @@ async def scrape_admission(soup):
         h2_tags = listing_article.find_all("h2", recursive=False)
         
         if h2_tags:
-
             find_all_div = listing_article.find_all("div",recursive=False)
             if find_all_div:
                 find_first_div = find_all_div[0]
@@ -215,25 +141,9 @@ async def scrape_admission(soup):
                 for cls in target_classes:
                     matched = find_first_div.find("div", class_=cls)
                     if matched:
-                        print("matched:", matched.has_attr('class'))
                         admission.extend(extract_dynamic_data_by_h2(matched))
             
             admission.extend(extract_dynamic_data_by_h2(listing_article))
-
-
-            # for h2 in h2_tags:
-            #     wrapper_div = h2.find_next_sibling("div")
-            #     if not wrapper_div:
-            #         continue
-
-            #     for inner in wrapper_div.find_all("div", recursive=False):
-            #         inner_classes = inner.get("class", [])
-            #         if VALID_CLASSES_SET_ADMISSION.intersection(inner_classes):
-            #             admission.append({
-            #                 "title": h2.get_text(strip=True),
-            #                 "content": str(inner).strip()
-            #             })
-            #             break
         else:
             admission = extract_sections_by_class(listing_article,VALID_CLASSES_SET_OVERVIEW)
 
