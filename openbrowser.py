@@ -14,5 +14,5 @@ data = get_url()
 
 for i in data[0:30]:
     time.sleep(0.5)
-    link = f"{i['url']}/cutoff"
+    link = f"{i['url']}"
     webbrowser.open(link)

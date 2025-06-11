@@ -3,7 +3,7 @@ import json
 import os
 from playwright.async_api import async_playwright
 from utils import get_college_slug, delay, USER_AGENTS
-from tabs import scrape_cutoff ,scrape_placements,scrape_admission ,scrape_overview , scrape_placements
+from tabs import scrape_cutoff ,scrape_placements,scrape_admission ,scrape_overview , scrape_placements, scrape_courses
 from bs4 import BeautifulSoup
 import logging
 from dotenv import load_dotenv
@@ -28,13 +28,23 @@ ROTATE_DRIVER_INTERVAL = int(os.getenv('ROTATE_DRIVER_INTERVAL', 5))
 MAX_MEMORY_PERCENT = int(os.getenv('MAX_MEMORY_PERCENT', 80))
 STRAPI_DATA_FILE = os.getenv('STRAPI_DATA_FILE', 'all_strapi_data.json')
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+
 
 # Define the tabs and their corresponding scraping functions
 TAB_FUNCTIONS = {
     "overview": scrape_overview,
-    "admission": scrape_admission,
-    "placement": scrape_placements,
-    "cutoff": scrape_cutoff,
+    # "admission": scrape_admission,
+    # "placement": scrape_placements,
+    # "cutoff": scrape_cutoff,
+    # "courses-fees":scrape_courses
 }
 
 TABS = list(TAB_FUNCTIONS.keys())
@@ -49,7 +59,7 @@ async def rate_limit():
 
 
 def readurl():
-    with open("Medical_college.json","r",encoding="utf-8") as f:
+    with open("Medical_colleges.json","r",encoding="utf-8") as f:
         college_urls = json.load(f)
         return college_urls
         
@@ -61,31 +71,6 @@ def polite_wait(min_delay=3, max_delay=6):
     wait_time = random.uniform(min_delay, max_delay)
     time.sleep(wait_time)
 
-def remove_a_img(soup):
-    
-    for tag in soup.select("a"):
-        tag.unwrap()
-
-    for tag in soup.select("iframe"):
-        tag.decompose()
-
-    for tag in soup.select("img"):
-        tag.decompose()
-
-    for tag in soup.select("svg"):
-        tag.decompose()
-
-    for tag in soup.select("div.body-adslot"):
-        tag.decompose()
-    
-    for tag in soup.select("div.bodyslot-new"):
-        tag.decompose()
-
-    faq = soup.select_one(".cdcms_faqs")
-    if faq: faq.decompose()
-
-    return soup
-
 async def scrape_college(page, college_obj,university_data,idx):
     college_name = college_obj.get("college_name")
     base_url = college_obj.get("url")
@@ -96,7 +81,8 @@ async def scrape_college(page, college_obj,university_data,idx):
         "idx":idx,
         "college_name": college_name,
         "stream": stream,
-        "tabs": []
+        "tabs": [],
+        "courses":[]
     }
     
     for tab in TABS:
@@ -109,41 +95,47 @@ async def scrape_college(page, college_obj,university_data,idx):
                 if res:
                     status = res.status
                     if status == 403 or status == 429:
-                        print(f"[BACKOFF] {status} for {college_name} - Sleeping for 60 seconds")
+                        logging.info(f"[BACKOFF] {status} for {college_name} - Sleeping for 60 seconds")
                         await asyncio.sleep(60) 
                         continue  
                     elif status != 200:
-                        print(f"[SKIPPED] {tab} tab returned {status} for {college_name}")
+                        logging.info(f"[SKIPPED] {tab} tab returned {status} for {college_name}")
                         data["tabs"].append({
                             "title": tab,
                             "section": ""
                         })
+                        
                         break 
 
                 await page.wait_for_timeout(2000)
 
-                print(f"Scraping {tab} tab for college | {college_name}")
+                logging.info(f"Scraping {tab} tab for college | {college_name}")
 
                 scrape_func = TAB_FUNCTIONS[tab]
-                html = await page.content()
-                soup = BeautifulSoup(html, "html.parser")
-                soup = remove_a_img(soup)
+                
 
-                tab_data = await scrape_func(soup)
-                data["tabs"].append({
-                    "title":tab,
-                    "section":tab_data
-                })
+                tab_data = await scrape_func(page)
+                if tab == "courses-fees":
+                    for item in tab_data:
+                        data["tabs"].extend(item.get("tabs", []))
+                        data["courses"].extend(item.get("courses", []))
+                else:
+                    data["tabs"].append({
+                        "title":tab,
+                        "section":tab_data
+                    })
+
                 await delay()
                 break
             except Exception as e:
-                print(f"[RETRY {attempt+1}/3] {tab} tab failed for {college_name}: {e}")
+                logging.info(f"[RETRY {attempt+1}/3] {tab} tab failed for {college_name}: {e}")
                 if attempt == retry_attempts - 1:
-                    data["tabs"][tab] = None
-
+                    data["tabs"].append({
+                        "title": tab,
+                        "section": ""
+                    })
 
     university_data.append(data)
-    print(len(university_data))
     if len(university_data) >= BATCH_SIZE or psutil.virtual_memory().percent > MAX_MEMORY_PERCENT:
         await save_data_to_file(university_data,stream)
 
@@ -166,8 +158,10 @@ async def save_data_to_file(university_data,stream):
 
         university_data.clear()
 
+        logging.info("SUccesfully Saved!")
+
     except Exception as e:
-        print(f"[ERROR] Failed to save data: {e}")
+        logging.info(f"[ERROR] Failed to save data: {e}")
 
     return file_name
 
@@ -175,7 +169,7 @@ def resume():
 
     folder_name = "output"
     file_name = "College_tab_data.json"
-    file_path = f"{folder_name}\{file_name}"
+    file_path = f"{folder_name}\\{file_name}"
 
     data = None
     if os.path.exists(file_path):
@@ -190,7 +184,7 @@ def resume():
 
 async def main():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, slow_mo=100)
+        browser = await p.chromium.launch(headless=True, slow_mo=100)
         context = await browser.new_context(user_agent=random.choice(USER_AGENTS))
         page = await context.new_page()
         university_data = []
@@ -201,21 +195,21 @@ async def main():
 
         college_name = ''
 
-        for data in college_data[idx:31]:
+        for data in college_data[:1]:
             try:
                 if idx % ROTATE_DRIVER_INTERVAL == 0:
                     await browser.close()
-                    browser = await p.chromium.launch(headless=False, slow_mo=100)
+                    browser = await p.chromium.launch(headless=True, slow_mo=100)
                     context = await browser.new_context(user_agent=random.choice(USER_AGENTS))
                     page = await context.new_page()
 
                 college_name = data["college_name"]
                 await scrape_college(page, data,university_data,idx)
-                print(f"Succesfully Scraped {idx} out of {len(college_data)}")
+                logging.info(f"\nSuccesfully Scraped {idx} out of {len(college_data)}")
                 idx += 1
 
             except Exception as e:
-                print(f"[FATAL ERROR] Skipping college {college_name}: {e}")
+                logging.info(f"[FATAL ERROR] Skipping college {college_name}: {e}")
 
         await browser.close()
 

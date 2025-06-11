@@ -1,4 +1,7 @@
 from bs4 import BeautifulSoup
+import json
+import re
+
 
 VALID_CLASSES_OVERVIEW = [
     "cdcms_ranking","cdcms_cut_off","cdcms_cutoff",
@@ -27,6 +30,31 @@ VALID_CLASSES_ADMISSION = [
 ]
 
 VALID_CLASSES_SET_ADMISSION = set(VALID_CLASSES_ADMISSION)
+
+def remove_a_img(soup):
+    
+    for tag in soup.select("a"):
+        tag.unwrap()
+
+    for tag in soup.select("iframe"):
+        tag.decompose()
+
+    for tag in soup.select("img"):
+        tag.decompose()
+
+    for tag in soup.select("svg"):
+        tag.decompose()
+
+    for tag in soup.select("div.body-adslot"):
+        tag.decompose()
+    
+    for tag in soup.select("div.bodyslot-new"):
+        tag.decompose()
+
+    faq = soup.select_one(".cdcms_faqs")
+    if faq: faq.decompose()
+
+    return soup
 
 def extract_sections_by_class(listing_article,valid_classes_set):
 
@@ -99,34 +127,87 @@ def extract_dynamic_data_by_h2(section):
 
     return array_data
 
-async def scrape_overview(soup):
+async def scrape_overview(page):
     
     overview = []
+
+    all_ids = []
+
+    html = await page.content()
+    soup = BeautifulSoup(html, "html.parser")
     
     listing_article = soup.find("div", id="listing-article") 
 
     if listing_article:
-        listing_article_all_div = listing_article.find_all("div", recursive=False)
 
-        if listing_article_all_div:
-            section1_divs = [
-                div for div in listing_article_all_div
-                if any(cls in div.get("class", []) for cls in ["cdcms_section1", "cdcms_college_highlights"])
-            ]
+        toc_heading = soup.find(string=re.compile(r'\btable of contents?\b', re.I))
 
-            if section1_divs:
-                overview.extend(extract_sections_by_class(section1_divs[0],VALID_CLASSES_SET_OVERVIEW))
-                overview.extend(extract_dynamic_data_by_h2(section1_divs[0]))
+        print("TOC Heading Found:", toc_heading)
 
-            if not overview:
-                overview.extend(extract_sections_by_class(listing_article,VALID_CLASSES_SET_OVERVIEW))
-                overview.extend(extract_dynamic_data_by_h2(listing_article))
+        # Step 3: If found, locate the next <ol> and extract all <a> tags from <li>
+        if toc_heading:
+            ol_tag = toc_heading.find_next("ol")
+
+            if ol_tag:
+                a_tags = ol_tag.find_all("a")
+                for a in a_tags:
+                    tag_id = a.get("href")
+                    all_ids.append(tag_id)
+
+        soup = remove_a_img(soup)
+
+        if all_ids:
+
+            section_data = {}
+
+            for specific_id in all_ids[:1]:
+
+                tag = listing_article.find(id=specific_id[1:])
+
+                if not tag:
+                    continue
+
+                content = []
+
+                
+
+            
+
+        
+
+
+
+
+
+
+
+
+
+        # listing_article_all_div = listing_article.find_all("div", recursive=False)
+
+        # if listing_article_all_div:
+        #     section1_divs = [
+        #         div for div in listing_article_all_div
+        #         if any(cls in div.get("class", []) for cls in ["cdcms_section1", "cdcms_college_highlights"])
+        #     ]
+
+        #     if section1_divs:
+        #         overview.extend(extract_sections_by_class(section1_divs[0],VALID_CLASSES_SET_OVERVIEW))
+        #         overview.extend(extract_dynamic_data_by_h2(section1_divs[0]))
+
+        #     if not overview:
+        #         overview.extend(extract_sections_by_class(listing_article,VALID_CLASSES_SET_OVERVIEW))
+        #         overview.extend(extract_dynamic_data_by_h2(listing_article))
 
     return overview
 
-async def scrape_admission(soup):
+async def scrape_admission(page):
 
     admission = []
+
+    html = await page.content()
+    soup = BeautifulSoup(html, "html.parser")
+    soup = remove_a_img(soup)
     
     listing_article = soup.find("div", id="listing-article")
     if listing_article:
@@ -149,9 +230,16 @@ async def scrape_admission(soup):
 
     return admission
 
-async def scrape_placements(soup):
+async def scrape_placements(page):
+
+    html = await page.content()
+    soup = BeautifulSoup(html, "html.parser")
+    soup = remove_a_img(soup)
+
     listing_article = soup.find("div", id="listing-article")
     placement = []
+
+    
 
     if listing_article:
         
@@ -165,7 +253,11 @@ async def scrape_placements(soup):
     return placement
 
 
-async def scrape_cutoff(soup):
+async def scrape_cutoff(page):
+
+    html = await page.content()
+    soup = BeautifulSoup(html, "html.parser")
+    soup = remove_a_img(soup)
     
     listing_article = soup.find("div",id="listing-article")
 
@@ -201,8 +293,155 @@ async def scrape_cutoff(soup):
                         "title":h2_text,
                         "content": "".join( str(i) for i in all_div[:len(all_div) - 1])
                     })
+    return cutoff
+
+def sub_course_data(all_td):
+
+    sub_course_name = None
+    sub_course_fees = None
+    sub_course_application_date = None
+    sub_course_cutoff = None
+
+    for idx,td in enumerate(all_td,start=0):
+
+        text = td.get_text()
+
+        if idx == 0:
+            decompose_div1 = td.find("div",class_="jsx-2530098677 pointer position-absolute top-0 right-0 fs-11 d-flex align-items-center p-1")
+            decompose_div2 = td.find("div",class_="jsx-2530098677 d-flex fs-14 font-weight-medium margint-2")
+            decompose_div3 = td.find("div",class_="jsx-2530098677 d-flex fs-11 font-weight-medium mt-2 font-italic")
+
+            if decompose_div1:
+                decompose_div1.decompose()
+            if decompose_div2:
+                decompose_div2.decompose()
+            if decompose_div3:
+                decompose_div3.decompose()
+
+            text = td.get_text()
+
+            sub_course_name = text
+        elif idx == 1:
+            sub_course_fees = text
+        elif idx == 2:
+            sub_course_application_date = text
+        elif idx == 3:
+            sub_course_cutoff = text
+    
+    return {
+        "sub_course_name":sub_course_name,
+        "sub_course_fees":sub_course_fees,
+        "sub_course_application_date":sub_course_application_date,
+        "sub_course_cutoff":sub_course_cutoff
+    }
+
+async def sub_college_fetch_table(soup2):
+
+    data = []
+    sub_courses_table = soup2.find("table",recursive=True)
+
+    if sub_courses_table:
+        sub_courses_tbody = sub_courses_table.find("tbody",recursive=False)
+        sub_courses_tr = sub_courses_tbody.find_all("tr")
+
+        if sub_courses_tr:
+            for idx, tr in enumerate(sub_courses_tr,start=0):
+                all_td = tr.find_all("td", recursive=False)
+                data.append(sub_course_data(all_td))
+
+    return data
+
+
+
+async def scrape_courses(page):
+
+    html = await page.content()
+    soup = BeautifulSoup(html, "html.parser")
+    soup = remove_a_img(soup)
+
+    main_course = []
+    courses = []
+    course_info = []
+    
+    fees_info = soup.find("section",class_="fees-info")
+
+    if fees_info:
+        
+        h2_tag = fees_info.find("h2",recursive=False)
+        if h2_tag:
+            h2_text = h2_tag.get_text(strip=True)
+        
+        course_data = soup.find("div",class_="jsx-558956768 slug-article fs-16 font-weight-normal text-primary-black mb-4")
+        if course_data:
+            courses.append({
+                "title":h2_text,
+                "sections":str(course_data)
+            })
+
+
+        course_table = fees_info.find("table",recursive=False)
+
+        if course_table:
+            tbody = course_table.find("tbody",recursive=False)
+            all_tr = tbody.find_all("tr",recursive=False)
+            modal_index = 0  
+
+            if all_tr:
+                for idx, tr in enumerate(all_tr):
+                    course_name_text = None
+                    modal_html = None
+                    sub_course_info = []
+                    all_td = tr.find_all("td", recursive=False)
+                    if all_td:
+                        
+                        sub_courses = all_td[0].find("div", class_="pointer")
+                        if sub_courses:
+                            try:
+                                modal_buttons = page.locator("div.jsx-558956768.pointer.text-primary-blue.fs-14.d-flex")
+                                await modal_buttons.nth(modal_index).click()
+                                await page.wait_for_selector("div.modal-content", state="visible")
+
+                                modal_html = await page.locator("div.modal-content").inner_html()
+                                soup2 = BeautifulSoup(modal_html, "html.parser")
+                                sub_course_info = await sub_college_fetch_table(soup2)
+
+                                await page.click("span.circle-cross-black-24")
+
+                            except Exception as e:
+                                print(f"❌ Failed on row {idx} ({course_name_text}):", e)
+                            finally:
+                                modal_index += 1 
+
+                        if modal_html and modal_html.strip():
+                            course_name_div = all_td[0].find("div", class_="course-name")
+                            course_name_elem = course_name_div.select_one("div") if course_name_div else None
+                            course_name_text = course_name_elem.get_text(strip=True) if course_name_elem else "Unknown Course"
+                        else:
+                            course_name_div = all_td[0].find("div", class_="course-name")
+                            course_name_text = course_name_div.get_text(strip=True) if course_name_div else "Unknown Course"
+
+                        all_td[1].find("button").decompose() if all_td[1].find("button") else ""
+                        course_fees = all_td[1].get_text()
+                        course_eligibility = all_td[2].get_text()
+                        course_application_date = all_td[3].get_text()
+
+                        course_info.append({
+                            "course_name" : str(course_name_text),
+                            "course_fees":str(course_fees),
+                            "course_eligibility":str(course_eligibility),
+                            "course_application_date":str(course_application_date),
+                            "sub_course_info_list":sub_course_info
+                        })
+                        
+    main_course.append({
+        "tabs":courses,
+        "courses":course_info
+    })
+
+   
+    return main_course
+    
                                 
 
-    return cutoff
 
 
