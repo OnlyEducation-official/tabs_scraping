@@ -160,16 +160,33 @@ async def scrape_overview(page):
 
             section_data = {}
 
-            for specific_id in all_ids[:1]:
+            for specific_id in all_ids[:]:
 
                 tag = listing_article.find(id=specific_id[1:])
+                if tag:
+                    h2_text = tag .get_text()
+                    print(h2_text)
 
                 if not tag:
                     continue
 
-                content = []
-
+                overview = []
                 
+                
+
+            #     for siblings in tag.find_next_siblings():
+            #         if siblings.get("id") in all_ids:
+            #             break
+            #         print(siblings.name)
+            #         # overview.append({
+            #         #     "title":h2_text,
+            #         #     "content":str(siblings)
+            #         # })
+
+            # with open("file_name.json","w",encoding="utf-8") as f:
+            #     json.dump(overview,f,ensure_ascii=False,indent=2)
+
+            # print(overview)
 
             
 
@@ -295,7 +312,7 @@ async def scrape_cutoff(page):
                     })
     return cutoff
 
-def sub_course_data(all_td):
+async def sub_course_data(all_td):
 
     sub_course_name = None
     sub_course_fees = None
@@ -318,9 +335,8 @@ def sub_course_data(all_td):
             if decompose_div3:
                 decompose_div3.decompose()
 
-            text = td.get_text()
+            sub_course_name = td.get_text(strip=True)
 
-            sub_course_name = text
         elif idx == 1:
             sub_course_fees = text
         elif idx == 2:
@@ -342,16 +358,16 @@ async def sub_college_fetch_table(soup2):
 
     if sub_courses_table:
         sub_courses_tbody = sub_courses_table.find("tbody",recursive=False)
-        sub_courses_tr = sub_courses_tbody.find_all("tr")
+        if sub_courses_tbody:
+            sub_courses_tr = sub_courses_tbody.find_all("tr")
 
-        if sub_courses_tr:
-            for idx, tr in enumerate(sub_courses_tr,start=0):
-                all_td = tr.find_all("td", recursive=False)
-                data.append(sub_course_data(all_td))
+            if sub_courses_tr:
+                for idx, tr in enumerate(sub_courses_tr,start=0):
+                    all_td = tr.find_all("td", recursive=False)
+                    ok = await sub_course_data(all_td)
+                    data.append(ok)
 
     return data
-
-
 
 async def scrape_courses(page):
 
@@ -378,9 +394,7 @@ async def scrape_courses(page):
                 "sections":str(course_data)
             })
 
-
         course_table = fees_info.find("table",recursive=False)
-
         if course_table:
             tbody = course_table.find("tbody",recursive=False)
             all_tr = tbody.find_all("tr",recursive=False)
@@ -389,41 +403,57 @@ async def scrape_courses(page):
             if all_tr:
                 for idx, tr in enumerate(all_tr):
                     course_name_text = None
+                    course_fees = None
+                    course_eligibility = None
+                    course_application_date = None
+
                     modal_html = None
                     sub_course_info = []
                     all_td = tr.find_all("td", recursive=False)
                     if all_td:
+
+                        for idx,td in enumerate(all_td,start=0):
+                            text = td.get_text(strip=True)
+
+                            if idx == 0:
                         
-                        sub_courses = all_td[0].find("div", class_="pointer")
-                        if sub_courses:
-                            try:
-                                modal_buttons = page.locator("div.jsx-558956768.pointer.text-primary-blue.fs-14.d-flex")
-                                await modal_buttons.nth(modal_index).click()
-                                await page.wait_for_selector("div.modal-content", state="visible")
+                                sub_courses = td.find("div", class_="pointer")
+                                if sub_courses:
+                                    try:
+                                        modal_buttons = page.locator("div.jsx-558956768.pointer.text-primary-blue.fs-14.d-flex")
+                                        if await modal_buttons.count() > modal_index:
+                                            await modal_buttons.nth(modal_index).click()
+                                        await page.wait_for_selector("div.modal-content", state="visible")
 
-                                modal_html = await page.locator("div.modal-content").inner_html()
-                                soup2 = BeautifulSoup(modal_html, "html.parser")
-                                sub_course_info = await sub_college_fetch_table(soup2)
+                                        await page.wait_for_timeout(1000)
 
-                                await page.click("span.circle-cross-black-24")
+                                        modal_html = await page.locator("div.modal-content").inner_html()
+                                        soup2 = BeautifulSoup(modal_html, "html.parser")
+                                        sub_course_info = await sub_college_fetch_table(soup2)
 
-                            except Exception as e:
-                                print(f"❌ Failed on row {idx} ({course_name_text}):", e)
-                            finally:
-                                modal_index += 1 
+                                        await page.click("span.circle-cross-black-24")
 
-                        if modal_html and modal_html.strip():
-                            course_name_div = all_td[0].find("div", class_="course-name")
-                            course_name_elem = course_name_div.select_one("div") if course_name_div else None
-                            course_name_text = course_name_elem.get_text(strip=True) if course_name_elem else "Unknown Course"
-                        else:
-                            course_name_div = all_td[0].find("div", class_="course-name")
-                            course_name_text = course_name_div.get_text(strip=True) if course_name_div else "Unknown Course"
+                                    except Exception as e:
+                                        print(f"❌ Failed on row {idx} ({course_name_text}):", e)
+                                    finally:
+                                        modal_index += 1 
 
-                        all_td[1].find("button").decompose() if all_td[1].find("button") else ""
-                        course_fees = all_td[1].get_text()
-                        course_eligibility = all_td[2].get_text()
-                        course_application_date = all_td[3].get_text()
+                                if modal_html and modal_html.strip():
+                                    course_name_div = td.find("div", class_="course-name")
+                                    course_name_elem = course_name_div.select_one("div") if course_name_div else None
+                                    course_name_text = course_name_elem.get_text(strip=True) if course_name_elem else "Unknown Course"
+                                else:
+                                    course_name_div = td.find("div", class_="course-name")
+                                    course_name_text = course_name_div.get_text(strip=True) if course_name_div else "Unknown Course"
+                            elif idx == 1:
+                                button = td.find("button")
+                                if button:
+                                    button.decompose()
+                                course_fees = text
+                            elif idx == 2:
+                                course_eligibility = text
+                            elif idx == 3:
+                                course_application_date = text
 
                         course_info.append({
                             "course_name" : str(course_name_text),

@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import psutil 
 import random
 import time
+import traceback
 
 load_dotenv()
 
@@ -40,11 +41,11 @@ logging.basicConfig(
 
 # Define the tabs and their corresponding scraping functions
 TAB_FUNCTIONS = {
-    "overview": scrape_overview,
+    # "overview": scrape_overview,
     # "admission": scrape_admission,
     # "placement": scrape_placements,
     # "cutoff": scrape_cutoff,
-    # "courses-fees":scrape_courses
+    "courses-fees":scrape_courses
 }
 
 TABS = list(TAB_FUNCTIONS.keys())
@@ -71,64 +72,75 @@ def polite_wait(min_delay=3, max_delay=6):
     wait_time = random.uniform(min_delay, max_delay)
     time.sleep(wait_time)
 
-async def scrape_college(page, college_obj,university_data,idx):
-    college_name = college_obj.get("college_name")
-    base_url = college_obj.get("url")
-    stream = college_obj.get("stream")
+async def scrape_college(page, college_obj, university_data, idx):
+    college_name = college_obj.get("college_name", "Unknown College")
+    base_url = college_obj.get("url", "")
+    stream = college_obj.get("stream", "Unknown Stream")
     slug = get_college_slug(base_url)
 
     data = {
-        "idx":idx,
+        "idx": idx,
         "college_name": college_name,
         "stream": stream,
         "tabs": [],
-        "courses":[]
+        "courses": []
     }
-    
+
     for tab in TABS:
         tab_url = base_url if tab == "overview" else f"{base_url}/{tab}"
         retry_attempts = 3
+
         for attempt in range(retry_attempts):
             try:
                 await rate_limit()
                 res = await page.goto(tab_url, timeout=30000, wait_until="domcontentloaded")
-                if res:
-                    status = res.status
-                    if status == 403 or status == 429:
-                        logging.info(f"[BACKOFF] {status} for {college_name} - Sleeping for 60 seconds")
-                        await asyncio.sleep(60) 
-                        continue  
-                    elif status != 200:
-                        logging.info(f"[SKIPPED] {tab} tab returned {status} for {college_name}")
-                        data["tabs"].append({
-                            "title": tab,
-                            "section": ""
-                        })
-                        
-                        break 
+
+                if not res:
+                    logging.warning(f"[NAVIGATE FAILED] {tab_url} returned None for {college_name}")
+                    break
+
+                status = res.status
+                if status in (403, 429):
+                    logging.info(f"[BACKOFF] {status} for {college_name} - Sleeping for 60 seconds")
+                    await asyncio.sleep(60)
+                    continue
+                elif status != 200:
+                    logging.warning(f"[SKIPPED] {tab} tab returned {status} for {college_name}")
+                    data["tabs"].append({
+                        "title": tab,
+                        "section": ""
+                    })
+                    break
 
                 await page.wait_for_timeout(2000)
-
                 logging.info(f"Scraping {tab} tab for college | {college_name}")
 
-                scrape_func = TAB_FUNCTIONS[tab]
-                
+                scrape_func = TAB_FUNCTIONS.get(tab)
+                if not scrape_func:
+                    logging.warning(f"[NO FUNC] No scraping function for tab '{tab}'")
+                    break
 
                 tab_data = await scrape_func(page)
+
                 if tab == "courses-fees":
-                    for item in tab_data:
-                        data["tabs"].extend(item.get("tabs", []))
-                        data["courses"].extend(item.get("courses", []))
+                    if isinstance(tab_data, list):
+                        for item in tab_data:
+                            data["tabs"].extend(item.get("tabs", []))
+                            data["courses"].extend(item.get("courses", []))
+                    else:
+                        logging.warning(f"[FORMAT ERROR] courses-fees tab_data not list for {college_name}")
                 else:
                     data["tabs"].append({
-                        "title":tab,
-                        "section":tab_data
+                        "title": tab,
+                        "section": tab_data if isinstance(tab_data, str) else str(tab_data)
                     })
 
                 await delay()
-                break
+                break  # Successful scrape, exit retry loop
+
             except Exception as e:
-                logging.info(f"[RETRY {attempt+1}/3] {tab} tab failed for {college_name}: {e}")
+                logging.error(f"[RETRY {attempt+1}/3] {tab} tab failed for {college_name}: {e}")
+                traceback.print_exc()
                 if attempt == retry_attempts - 1:
                     data["tabs"].append({
                         "title": tab,
@@ -136,8 +148,14 @@ async def scrape_college(page, college_obj,university_data,idx):
                     })
 
     university_data.append(data)
-    if len(university_data) >= BATCH_SIZE or psutil.virtual_memory().percent > MAX_MEMORY_PERCENT:
-        await save_data_to_file(university_data,stream)
+
+    try:
+        if len(university_data) >= BATCH_SIZE or psutil.virtual_memory().percent > MAX_MEMORY_PERCENT:
+            await save_data_to_file(university_data, stream)
+    except Exception as e:
+        logging.error(f"[SAVE FAILED] Error while saving data for {college_name}: {e}")
+        traceback.print_exc()
+
 
 async def save_data_to_file(university_data,stream):
     try:
@@ -184,7 +202,7 @@ def resume():
 
 async def main():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, slow_mo=100)
+        browser = await p.chromium.launch(headless=False, slow_mo=100)
         context = await browser.new_context(user_agent=random.choice(USER_AGENTS))
         page = await context.new_page()
         university_data = []
@@ -195,11 +213,11 @@ async def main():
 
         college_name = ''
 
-        for data in college_data[:1]:
+        for data in college_data[:100]:
             try:
                 if idx % ROTATE_DRIVER_INTERVAL == 0:
                     await browser.close()
-                    browser = await p.chromium.launch(headless=True, slow_mo=100)
+                    browser = await p.chromium.launch(headless=False, slow_mo=100)
                     context = await browser.new_context(user_agent=random.choice(USER_AGENTS))
                     page = await context.new_page()
 
