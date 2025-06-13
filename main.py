@@ -25,7 +25,7 @@ LOG_FILE = os.getenv('LOG_FILE', 'collegedunia_scraper.log')
 OUTPUT_DIR = os.getenv('OUTPUT_DIR', 'university_data')
 BASE_URL_FILE = os.getenv('BASE_URL_FILE', 'Medical_college.json')
 BATCH_SIZE = int(os.getenv('BATCH_SIZE', 10))
-ROTATE_DRIVER_INTERVAL = int(os.getenv('ROTATE_DRIVER_INTERVAL', 5))
+ROTATE_DRIVER_INTERVAL = int(os.getenv('ROTATE_DRIVER_INTERVAL', 20))
 MAX_MEMORY_PERCENT = int(os.getenv('MAX_MEMORY_PERCENT', 80))
 STRAPI_DATA_FILE = os.getenv('STRAPI_DATA_FILE', 'all_strapi_data.json')
 
@@ -60,7 +60,7 @@ async def rate_limit():
 
 
 def readurl():
-    with open("Medical_colleges.json","r",encoding="utf-8") as f:
+    with open("Medical_college.json","r",encoding="utf-8") as f:
         college_urls = json.load(f)
         return college_urls
         
@@ -82,8 +82,8 @@ async def scrape_college(page, college_obj, university_data, idx):
         "idx": idx,
         "college_name": college_name,
         "stream": stream,
-        "tabs": [],
-        "courses": []
+        # "tabs": [],
+        "data":{}
     }
 
     for tab in TABS:
@@ -106,10 +106,13 @@ async def scrape_college(page, college_obj, university_data, idx):
                     continue
                 elif status != 200:
                     logging.warning(f"[SKIPPED] {tab} tab returned {status} for {college_name}")
-                    data["tabs"].append({
-                        "title": tab,
-                        "section": ""
-                    })
+                    if tab == "courses-fees":
+                        data["data"]["NewCoursesAndFees"] = {}
+                    else:
+                        data["tabs"].append({
+                            "title": tab,
+                            "section": ""
+                        })
                     break
 
                 await page.wait_for_timeout(2000)
@@ -123,10 +126,8 @@ async def scrape_college(page, college_obj, university_data, idx):
                 tab_data = await scrape_func(page)
 
                 if tab == "courses-fees":
-                    if isinstance(tab_data, list):
-                        for item in tab_data:
-                            data["tabs"].extend(item.get("tabs", []))
-                            data["courses"].extend(item.get("courses", []))
+                    if tab_data:
+                        data["data"]["NewCoursesAndFees"] = tab_data["NewCoursesAndFees"]
                     else:
                         logging.warning(f"[FORMAT ERROR] courses-fees tab_data not list for {college_name}")
                 else:
@@ -136,21 +137,25 @@ async def scrape_college(page, college_obj, university_data, idx):
                     })
 
                 await delay()
-                break  # Successful scrape, exit retry loop
+                break
 
             except Exception as e:
+
                 logging.error(f"[RETRY {attempt+1}/3] {tab} tab failed for {college_name}: {e}")
                 traceback.print_exc()
                 if attempt == retry_attempts - 1:
-                    data["tabs"].append({
-                        "title": tab,
-                        "section": ""
-                    })
+                    if tab == "courses-fees":
+                        data["data"]["NewCoursesAndFees"] = {}
+                    else:
+                        data["tabs"].append({
+                            "title": tab,
+                            "section": ""
+                        })
 
     university_data.append(data)
 
     try:
-        if len(university_data) >= BATCH_SIZE or psutil.virtual_memory().percent > MAX_MEMORY_PERCENT:
+        if len(university_data) >= BATCH_SIZE:
             await save_data_to_file(university_data, stream)
     except Exception as e:
         logging.error(f"[SAVE FAILED] Error while saving data for {college_name}: {e}")
@@ -160,7 +165,7 @@ async def scrape_college(page, college_obj, university_data, idx):
 async def save_data_to_file(university_data,stream):
     try:
         # file_name = os.path.join("output",f"{stream}_tabs_data.json")
-        file_name = os.path.join("output","College_tab_data.json")
+        file_name = os.path.join("output","Courses_tab_data.json")
         if os.path.exists(file_name):
             with open(file_name,"r",encoding="utf-8") as f:
                 existing_data = json.load(f)
@@ -186,10 +191,14 @@ async def save_data_to_file(university_data,stream):
 def resume():
 
     folder_name = "output"
-    file_name = "College_tab_data.json"
+    file_name = "Courses_tab_data.json"
     file_path = f"{folder_name}\\{file_name}"
 
     data = None
+
+    if os.path.exists(file_path):
+        return 0
+
     if os.path.exists(file_path):
 
         with open(file_path,"r",encoding="utf-8") as f:
@@ -202,7 +211,7 @@ def resume():
 
 async def main():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, slow_mo=100)
+        browser = await p.chromium.launch(headless=True, slow_mo=100)
         context = await browser.new_context(user_agent=random.choice(USER_AGENTS))
         page = await context.new_page()
         university_data = []
@@ -213,11 +222,11 @@ async def main():
 
         college_name = ''
 
-        for data in college_data[:100]:
+        for data in college_data[idx:1000]:
             try:
                 if idx % ROTATE_DRIVER_INTERVAL == 0:
                     await browser.close()
-                    browser = await p.chromium.launch(headless=False, slow_mo=100)
+                    browser = await p.chromium.launch(headless=True, slow_mo=100)
                     context = await browser.new_context(user_agent=random.choice(USER_AGENTS))
                     page = await context.new_page()
 
