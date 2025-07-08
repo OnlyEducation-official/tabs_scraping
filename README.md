@@ -19,9 +19,11 @@
 4. Run this script in 2 ways
 
   **A) Scrape Overview, admission, placements, cuttoff. **
+  
     - These tabs are light, so we can use EC2 medium instance
     
   **B) Scrape only courses & fees tab. **
+  
     - This is very heavy, because we are opening and closing models.Which is heavy and dynamic.
     - I scraped it on my local, (took 19 hours), havent tried it on EC2 Server. So, figure it our by try and error.
     - I have added batch processing, so if you use ec2.medium, it might work. Again, do try and error.
