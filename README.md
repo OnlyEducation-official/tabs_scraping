@@ -29,7 +29,7 @@
     - I have added batch processing, so if you use ec2.medium, it might work. Again, do try and error.
     
 5. Where to get the url of all the colleges 18000+
-6. Use the output of OnlyEducation-official/combine_all_scraped_url and paste it in this folder and run. Automatic batch processing will start.
+6. Use the output of **OnlyEducation-official/combine_all_scraped_url** and paste it in this folder and run. Automatic batch processing will start.
 7. I used 4 process at a time. If you have a good pc or good server, we can use more processes to scrape data faster
 8. Each process will store data in batch of 100.
 
