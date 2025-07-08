@@ -2,7 +2,9 @@ from bs4 import BeautifulSoup
 import json
 import re
 import logging
-
+from asyncio import TimeoutError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+import gc
 
 
 VALID_CLASSES_OVERVIEW = [
@@ -338,19 +340,21 @@ def sub_course_data(all_td):
             sub_course_name = text
 
         elif idx == 1:
-            # text = td.get_text(strip=True)  
             all_div = td.find_all("div")
 
             if len(all_div) >= 2:
-                sub_course_fees = all_div[0].get_text(strip=True) + " " + all_div[1].get_text(strip=True)
+                sub_course_fees = (
+                    (all_div[0].get_text(strip=True) if all_div[0] else "") + " " +
+                    (all_div[1].get_text(strip=True) if all_div[1] else "")
+                )
             else:
                 text = td.get_text(strip=True)
                 sub_course_fees = text
 
         elif idx == 2:
-            sub_course_application_date = text
+            sub_course_application_date = td.get_text(strip=True)
         elif idx == 3:
-            sub_course_cutoff = text
+            sub_course_cutoff = td.get_text(strip=True)
     
     return {
         "sub_course_name":sub_course_name,
@@ -360,22 +364,24 @@ def sub_course_data(all_td):
     }
 
 async def sub_college_fetch_table(soup2):
-
     data = []
-    sub_courses_table = soup2.find("table",recursive=True)
+    sub_courses_table = soup2.find("table", recursive=True)
 
     if sub_courses_table:
-        sub_courses_tbody = sub_courses_table.find("tbody",recursive=False)
+        sub_courses_tbody = sub_courses_table.find("tbody", recursive=False)
         if sub_courses_tbody:
             sub_courses_tr = sub_courses_tbody.find_all("tr")
-
             if sub_courses_tr:
-                for idx, tr in enumerate(sub_courses_tr,start=0):
+                for idx, tr in enumerate(sub_courses_tr, start=0):
                     all_td = tr.find_all("td", recursive=False)
-                    ok = sub_course_data(all_td)
-                    data.append(ok)
+                    try:
+                        ok = sub_course_data(all_td)
+                        data.append(ok)
+                    except Exception as e:
+                        logging.warning(f"⚠️ Failed to parse sub-course row {idx}: {e}")
 
     return data
+
 
 async def two_table_courses(fees_info,page,modal_index):
     course_info = []
@@ -385,7 +391,10 @@ async def two_table_courses(fees_info,page,modal_index):
         header_map = {}
         thead = course_table.find("thead",recursive=False)
         tbody = course_table.find("tbody",recursive=False)
-        all_tr = tbody.find_all("tr",recursive=False)
+        if not tbody:
+            return {"course_info": [], "modal_index": modal_index}
+
+        all_tr = tbody.find_all("tr", recursive=False)
 
         if thead:
             headers = thead.find_all("th")
@@ -418,9 +427,9 @@ async def two_table_courses(fees_info,page,modal_index):
                 all_td = tr.find_all("td", recursive=False)
                 if all_td:
 
-                    for idx, td in enumerate(all_td):
+                    for td_idx, td in enumerate(all_td):
 
-                        key = header_map.get(idx)
+                        key = header_map.get(td_idx)
                         text = td.get_text()
 
                         if not key:
@@ -433,21 +442,51 @@ async def two_table_courses(fees_info,page,modal_index):
                                     modal_buttons = page.locator("div.jsx-558956768.pointer.text-primary-blue.fs-14.d-flex")
                                     if await modal_buttons.count() > modal_index:
                                         await modal_buttons.nth(modal_index).click()
+                                        gc.collect()
                                         modal_index += 1 
+                                    else:
+                                        return {"course_info": [], "modal_index": modal_index}
+
                                     try:
                                         await page.wait_for_selector("div.modal-content", timeout=2000)
-                                        await page.wait_for_timeout(500)
-                                    except TimeoutError:
-                                        await page.wait_for_timeout(500)
+                                        await page.wait_for_timeout(1000)
+                                    except PlaywrightTimeoutError:
+                                        await page.wait_for_timeout(1000)
 
-                                    modal_html = await page.locator("div.modal-content").inner_html()
-                                    soup2 = BeautifulSoup(modal_html, "html.parser")
-                                    sub_course_info = await sub_college_fetch_table(soup2)
+                                    modal_locator = page.locator("div.modal-content")
+                                    if await modal_locator.count() > 0:
+                                        modal_html = await modal_locator.inner_html()
+                                        soup2 = BeautifulSoup(modal_html, "html.parser")
+                                        sub_course_info = await sub_college_fetch_table(soup2)
+                                        if not sub_course_info:
+                                            logging.info(f"ℹ️ Modal opened but no sub-courses found at modal index {modal_index}")
 
-                                    await page.click("span.circle-cross-black-24")
+                                    else:
+                                        logging.warning("⚠️ Modal content not found.")
+                                        modal_html = ""
+
+                                    try:
+                                        close_button = page.locator("span.circle-cross-black-24")
+                                        if await close_button.count() > 0:
+                                            await close_button.wait_for(timeout=3000)
+                                            await close_button.click()
+                                    except PlaywrightTimeoutError:
+                                        logging.warning("⚠️ Modal close button not found in time — attempting force-close via JS")
+                                        await page.evaluate("""
+                                            const closeBtn = document.querySelector('span.circle-cross-black-24');
+                                            if (closeBtn) closeBtn.click();
+                                        """)
+                                    except Exception as e:
+                                        logging.warning(f"⚠️ Modal close failed: {e}")
+
+                                    # Clean up leftover modals anyway
+                                    await page.evaluate("""
+                                        const modals = document.querySelectorAll('.modal.fade.show.d-block');
+                                        modals.forEach(m => m.remove());
+                                    """)
 
                                 except Exception as e:
-                                    print(f"❌ Failed on row {idx} ({course_name_text}):", e)
+                                    print(f"❌ Failed on row {td_idx} ({course_name_text}):", e)
                                 
                             if modal_html and modal_html.strip():
                                 course_name_div = td.find("div", class_="course-name")
@@ -482,56 +521,61 @@ async def two_table_courses(fees_info,page,modal_index):
     return {"course_info":course_info,"modal_index":modal_index}
 
 async def scrape_courses(page):
+    try:
+        html = await page.content()
+        soup = BeautifulSoup(html, "html.parser")
+        soup = remove_a_img(soup)
 
-    html = await page.content()
-    soup = BeautifulSoup(html, "html.parser")
-    soup = remove_a_img(soup)
+        courses = []
+        NewCoursesAndFees = {
+            "coursesFeesSections": []
+        }
+        modal_index = 0
 
-    courses = []
-    NewCoursesAndFees = {
-        "coursesFeesSections":[]
-    }
-    modal_index = 0
+        fees_info = soup.find_all("section", class_="fees-info")
 
-    fees_info = soup.find_all("section",class_="fees-info")
+        titles = ["Full Time Courses", "Part Time Courses"]
+        details_keys = ["full_time_courses", "part_time_courses"]
+        details_objects = [{}, {}]
 
-    titles = ["Full Time Courses", "Part Time Courses"]
-    details_keys = ["full_time_courses", "part_time_courses"]
-    details_objects = [{}, {}]
+        if fees_info:
+            h2_tag = fees_info[0].find("h2", recursive=False)
+            h2_text = h2_tag.get_text(strip=True) if h2_tag else "Courses Information"
 
-    if fees_info:
+            course_data = soup.find("div", class_="jsx-558956768 slug-article fs-16 font-weight-normal text-primary-black mb-4")
+            if course_data:
+                courses.append({
+                    "title": h2_text,
+                    "sections": str(course_data)
+                })
 
-        h2_tag = fees_info[0].find("h2",recursive=False)
-        h2_text = h2_tag.get_text(strip=True) if h2_tag else "Courses Information"
-        course_data = soup.find("div",class_="jsx-558956768 slug-article fs-16 font-weight-normal text-primary-black mb-4")
+            for idx in range(min(2, len(fees_info))):
+                try:
+                    fees_info_div = fees_info[idx]
+                    if not fees_info_div:
+                        continue
 
-        if course_data:
+                    course_type_data = await two_table_courses(fees_info_div, page, modal_index)
+                    modal_index = course_type_data.get("modal_index", modal_index)
+                    details_objects[idx][details_keys[idx]] = course_type_data.get("course_info", [])
 
-            # Add this when scraping all tabs data
-            courses.append({
-                "title":h2_text,
-                "sections":str(course_data)
-            })
-            # Add this when scraping all tabs data
+                    NewCoursesAndFees["coursesFeesSections"].append({
+                        "title": titles[idx],
+                        "courseDetails": details_objects[idx]
+                    })
 
-        for idx,fees_info_div in enumerate(fees_info,start=0):
-            if idx > 1 or not fees_info_div:
-                continue
+                    gc.collect()
 
-            course_type_data = await two_table_courses(fees_info_div, page, modal_index)
+                except Exception as e:
+                    logging.error(f"❌ Failed to process {titles[idx]} section: {e}")
+                    details_objects[idx][details_keys[idx]] = []
 
-            if course_type_data:
-                details_objects[idx][details_keys[idx]] = course_type_data["course_info"]
-                modal_index = course_type_data["modal_index"]
-            else:
-                details_objects[idx][details_keys[idx]] = []
+        return {"NewCoursesAndFees": NewCoursesAndFees}
 
-            NewCoursesAndFees["coursesFeesSections"].append({
-                "title": titles[idx],
-                "courseDetails": details_objects[idx]
-            })
-                        
-    return {"NewCoursesAndFees":NewCoursesAndFees}
+    except Exception as e:
+        logging.critical(f"🚨 scrape_courses() failed: {e}")
+        return {"NewCoursesAndFees": {"coursesFeesSections": []}}
+
 
     
                                 
