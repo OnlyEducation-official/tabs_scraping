@@ -7,12 +7,12 @@ import time
 data = []
 
 def get_url():
-    with open("Medical_colleges.json","r",encoding='utf-8') as f:
+    with open("Medical_college.json","r",encoding='utf-8') as f:
         return json.load(f)
     
 data = get_url()
 
 for i in data[0:30]:
     time.sleep(0.5)
-    link = f"{i['url']}/cutoff"
+    link = f"{i['url']}/courses-fees"
     webbrowser.open(link)
